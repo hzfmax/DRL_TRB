@@ -11,8 +11,11 @@ def scale(x, x_rng):
     return x_embbed
 
 
+# simulation part
+# simulation is the value of model
 def evaluate_policy(env, policy, eval_epochs=10, scale_func=lambda x: x):
     policy.eval()
+    # policy含义等价于act
     reward = []
     for ep in range(eval_epochs):
         ep_rwd = 0.
@@ -20,7 +23,9 @@ def evaluate_policy(env, policy, eval_epochs=10, scale_func=lambda x: x):
         obs = scale_func(obs)
         for step in range(env.max_svs):
             act = policy.act(torch.as_tensor(obs, dtype=torch.float32))
+            # 一次decision varaible
             obs, pwc, opc, done = env.step(act)
+            # state cost
             ep_rwd += pwc + opc
             obs = scale_func(obs)
             if done:
@@ -31,7 +36,7 @@ def evaluate_policy(env, policy, eval_epochs=10, scale_func=lambda x: x):
     policy.train()
     return avg_rwd, reward
 
-
+# simulation is the value of optimization model
 def fill_buffer_randomly(env_fn,
                          buffer,
                          scale_func=lambda x: x):
@@ -40,14 +45,22 @@ def fill_buffer_randomly(env_fn,
     pbar = tqdm(total=buffer.size)
     while not buffer.is_full():
         obs, done = env.reset()
+        # scale归一化
         obs = scale_func(obs)
         for step in range(env.max_svs):
+            # 这句是加入act的random
+            # 如果用这句话，就去learning
             act = np.random.randn(*env.action_space.shape)
+            
             obs2, pwc, opc, done = env.step(act)
             rew = pwc + opc
             obs2 = scale_func(obs2)
             buffer.store(obs, act, rew, done, obs2)
+            # 这个函数没有return是把buffer填满了，已存
+            # buffer是算法里的
             if done:
                 pbar.update(step + 1)
                 break
             obs = obs2
+
+    # 无return？？？？？？？？？？？

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*
 import argparse
 import os
 import random
@@ -52,6 +53,8 @@ def get_env_kwargs(demo=False, **kwargs):
     data = get_victoria_data()
     data['demand'] *= 0.8
     data['demand'] = np.moveaxis(data['demand'], 2, 0)
+    # numpy.moveaxis(a, source, destination)  
+    # ?????????
 
     kwargs['data'] = data
     return kwargs
@@ -77,7 +80,8 @@ def get_ddpg_kwargs():
     parser.add_argument('--lr_decay', default=0.1, type=float)
 
     # main variables
-    parser.add_argument('--epochs', default=10000, type=int)
+    parser.add_argument('--epochs', default=1, type=int)
+    #  parser.add_argument('--epochs', default=10000, type=int)
     parser.add_argument('--buffer_size', default=int(5e4), type=int)
     parser.add_argument('--eval_freq', default=200, type=int)
     parser.add_argument('--reward_scale', default=5000, type=int)

@@ -1,9 +1,11 @@
+from utils.loader import get_victoria_data
 import numba as nb
 import numpy as np
 from gym import Env, spaces
 
 
 # coefficients for cost function
+# 参数
 W_train, W_man = 197.3, 0.08  # Ton
 ctime = 6.945 / 3600  # pounds per second
 cost_per_dist = 3.046e-4  # pounds per meter
@@ -26,6 +28,7 @@ def board(eff_board_t, dpt, offset, T_in, cap, TDD, CDD):
 
     num_plat = len(dpt)  # number of platforms
     num_stat = np.int64(num_plat / 2) - 1  # number of stations
+    # ???????????????
 
     # update the boarding time at the terminal platform
     eff_board_t[-1] = board_t_max[-1]
@@ -65,6 +68,7 @@ def board(eff_board_t, dpt, offset, T_in, cap, TDD, CDD):
                     eff_board_t[s], board_t, dtype=np.float64)
 
                 pwt += np.dot(waitt, waitn)
+                # 矩阵内积
 
                 # train load for each route
                 psg_brd_route[s if s < num_stat else s - 1] = board_psg_to.sum()
@@ -74,6 +78,10 @@ def board(eff_board_t, dpt, offset, T_in, cap, TDD, CDD):
 
                 # update the effective boarding time
                 eff_board_t[s] = board_t
+    # 每个station停车时间
+    # 每个station剩余的人数
+    # 总的等待时间
+    # 每个车站车上的人数
 
     return eff_board_t, psg_left, pwt, psg_brd_route
 
@@ -82,16 +90,32 @@ def board(eff_board_t, dpt, offset, T_in, cap, TDD, CDD):
          fastmath=True,
          cache=True)
 def cost_func(runt, dwl, dis, psg_brd_route, pwt, alpha, ofix):
-    v = dis / runt
+    v = dis / runt #速度
+    # Given a train service n, the resistance force F(vn, i) 
+    # acted on the train that is running at a speedover track section between nodes i and i + 1 can be estimated with the well-known Davis Equation 
+    
     eng = ((beta1 + beta2 * v + beta3 * v**2) *
            (W_train + W_man * psg_brd_route) * dis).sum() * ceng
     pwc = alpha * cwait * pwt
     opc = (1 - alpha) * (eng + ofix + ctime * runt.sum())
     return pwc, opc
-
+# objective function
+# pwt = 0.  # total passenger waiting time
+# cbrdt = 6.46 / 3600  # pounds per second cwait = 2.5 * cbrdt  # pounds per second
+# psg_brd_route occupancy when the train leaves station i
+# pwt# total passenger waiting time
+# eng  energy cost 
+# alpha coefficient adjusting the trade-off between passengers` cost and operators` cost
+# ceng unit cost of fuel
+# cwait unit cost of running time 
+# ctime unit cost of distance
+# The distance dependent cost  can be regarded as a fixed cost for each train service. 
+# pwc monetary total waiting cost of passengers over all station nodes i along the entire service route by train service n
+# opc opertion cost for trian service n  energy-related and maintance-related cost
 
 @nb.njit(fastmath=True)
 def maximum_filter(x):
+    # 找最大
     x = np.maximum(x, 0)
     max_x = 0
     for i in range(len(x)):
@@ -111,13 +135,15 @@ def xvalid(act, arv, dpt, hdw_sft, stock, num_plat, var_max, var_int, var_min, t
     if train % stock != 0:
         idx = train + stock - (train % stock)  # index of previous trip
         hdw = max(hdw, ftrain[idx] - var_max[0] * (idx - train) - arv[0])
+        # n>K 时的headway限制
 
     if act[0] < hdw:
         act[0] = np.ceil((hdw - var_min[0]) / var_int[0]) * var_int[0] + var_min[0]
+        # headway 限制大小
 
     # Safety headway, unsafe when > 0, refer to equation (26)
     safe = dpt + hdw_sft - arv[0] - act.cumsum()[0::2]
-
+    # - hdw_sft + arv[0] + act.cumsum()[0::2]
     if safe.max() > 0:
         safe = maximum_filter(safe)  # adjust those greater than 0
 
@@ -126,6 +152,7 @@ def xvalid(act, arv, dpt, hdw_sft, stock, num_plat, var_max, var_int, var_min, t
         for i in range(num_plat - 1, -1, -1):
             if safe[i] > 0:
                 pid = i * 2  # first adjust the dwell time
+            
                 if sps[pid] >= safe[i]:
                     act[pid] += np.int64(np.ceil(
                         safe[i] / var_int[pid])) * var_int[pid]
@@ -133,8 +160,7 @@ def xvalid(act, arv, dpt, hdw_sft, stock, num_plat, var_max, var_int, var_min, t
                     safe[i] -= sps[pid]
                     act[pid] = var_max[pid]
                     if sps[pid - 1] >= safe[i]:
-                        act[pid -
-                            1] += np.int64(np.ceil(
+                        act[pid -1] += np.int64(np.ceil(
                                 safe[i] / var_int[pid - 1])) * var_int[pid - 1]
                     else:
                         safe[i - 1] += safe[i] + act[pid - 1] - var_max[pid - 1]
@@ -156,8 +182,9 @@ def xvalid(act, arv, dpt, hdw_sft, stock, num_plat, var_max, var_int, var_min, t
                     act[pid - 1] -= np.int64(
                         np.ceil((mxhdw[idx] - sps[pid]) /
                                 var_int[pid - 1])) * var_int[pid - 1]
-
+    print(act)
     return act
+    # act headway running time dwell time 对每个车站
 
 
 @nb.njit(fastmath=True)
@@ -166,6 +193,8 @@ def ODshape(tvd):
     output = np.zeros((shp[0], shp[1] * 2, shp[2] * 2), dtype=np.float64)
     output[:, :shp[1], :shp[2]] = np.triu(tvd, 1)
     output[:, shp[1]:, shp[2]:] = np.tril(tvd, -1)[:, ::-1, ::-1]
+    # 返回上三角和下三角矩阵的函数，值得说的是参数k。  k表示从第几条对角线起保留数据。 
+    # 正值是主对角线往上数，负值 是往下数。k=0时表示从主对角线开始保留。
     return output
 
 
@@ -178,11 +207,14 @@ class TubeEnv(Env):
             data,
             t_start=6,
             t_end=10,
+            # 6:00-10:00
             capacity=500,
             alpha=0.5,
             turn=218,
             stock_size=24,
-            num_station=8,
+            # 24 trains
+            num_station=5,
+            # 控制需要的station数量，截取信息
             stochastic=False,
             random_factor=0.25,
             headway_min=100,
@@ -207,11 +239,13 @@ class TubeEnv(Env):
         self.stochastic = stochastic  # Wether this is a stochastic env
         self.headway_safe = headway_safe  # safety headway
         self.max_svs = np.int64((self.t_end - self.t_start) * 3600 / headway_min) + 1
+        # 145 N最大值
         self.random_factor = random_factor
 
         # Platform information
         self.num_stat = num_station
         self.num_plat = num_station * 2
+        # 在这里根据需要的车站数量对全部station信息进行了截取
         self.routes = list(
             map(lambda x: x + "O", data['routes'][:self.num_stat])) + list(
                 map(lambda x: x + "I", data['routes'][:self.num_stat][::-1]))
@@ -230,6 +264,10 @@ class TubeEnv(Env):
             (self.t_start - 5) * 60:(self.t_end - 5) *
             60, :int(num_station), :][..., :int(num_station)]
         self.TDD = np.repeat(ODshape(self.tvd) / 60, 60, axis=0)  # to be used for static env
+        # 60分钟
+        # ？？？？？？？？？？
+        # Z
+        # TDD  
 
         # Range of variables
         self.nopt = np.array([[headway_opt] + [run_opt] *
@@ -253,6 +291,7 @@ class TubeEnv(Env):
                                  np.zeros(self.num_plat)]).astype(np.float64)
 
         # RL space
+        # 
         self.action_space = spaces.Box(low=-1,
                                        high=1,
                                        shape=(2 * self.num_plat, ), dtype=np.float64)
@@ -278,16 +317,21 @@ class TubeEnv(Env):
 
         if self.stochastic:
             # This is faster than calcuation based on repeated matrix
+            # 在TDD中加入random factor
             self.TDD = self.tvd * np.maximum(
                 np.random.normal(1, self.random_factor, self.tvd.shape), 0.)
+                # 高斯分布
             self.TDD = np.repeat(self.TDD / 60, 60, axis=0)
             self.TDD = ODshape(self.TDD)
 
         self.CDD = self.TDD.cumsum(0).sum(2)
+        # ？？？？？？这部分怎么重设state？？？
         return self.state, False
 
     def step(self, action):
         # translate the action
+        # step就是一个service run
+        # 这里是转换
         act = (np.around(self.nopt * (action + 1) / 2) * self.var_int +
                self.var_min).astype(np.int64)
 
@@ -329,19 +373,49 @@ class TubeEnv(Env):
 
         # get the state representation
         self.state = np.concatenate([[self.train], ttb, psg_left], 0)
-
+        # np.concatenate
+        # 需要指定拼接的方向，默认是 axis = 0，也就是说对0轴的数组对象进行纵向的拼接（纵向的拼接沿着axis= 1方向）；注：一般axis = 0，就是对该轴向的数组进行操作，操作方向是另外一个轴，即axis=1。
+        # Join a sequence of arrays along an existing axis.
+        # state variable train index,new timetable, left passgers
+        # 传入的数组必须具有相同的形状，这里的相同的形状可以满足在拼接方向axis轴上数
+        # ttb arrival/departure times for all nodes
         return self.state, pwc, opc, done
+        # 一个step，采取一个action之后的结果
+        #  train index,new timetable, left passgers, Weather all passengers have been served
+        # pwc monetary total waiting cost of passengers over all station nodes i along the entire service route by train service n
+        # opc opertion cost for trian service n  energy-related and maintance-related cost
+        # 为什么是49？1+32+16
+        # train_index total24
 
     def seed(self, seed=None):
         self.np_random = np.random.RandomState()
         if np.isscalar(seed):
+            # 这是一个逻辑函数，如果输入num的类型为标量，则返回true。
             seed = int(seed * np.pi)
             self._seed = seed
             self.np_random.seed(self._seed)
             self.action_space.seed(self._seed)
+            # ？？？？？？？？？？？？？
         else:
             self._seed = None
         return [self._seed]
 
     def __str__(self):
-        return  f"{self.name}-v{self.version}"
+        return  f"{self.name}-v{self.version} "
+
+
+if __name__ == "__main__":
+    data = get_victoria_data()
+
+    env = TubeEnv(data)
+    s = env.reset()
+
+    print(env.state)
+    print(len(env.state))  #?????49 1+32+16
+    # print ((s[0]))
+    # s[0]=env.state
+
+    # state is state_variables
+    # train index,new timetable, left passgers, 
+        
+    
